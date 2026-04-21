@@ -141,12 +141,20 @@ class GameManager:
             captured = self.board[end[0]][end[1]][end[2]][end[3]]
             moving = self.board[start[0]][start[1]][start[2]][start[3]]
             
+            promoted = False
+            if moving.type == "Pawn" and ((moving.color == "white" and end[1] == 7) or (moving.color == "black" and end[1] == 0)):
+                moving.type = "Queen"
+                promoted = True
+
             self.board[end[0]][end[1]][end[2]][end[3]] = moving
             self.board[start[0]][start[1]][start[2]][start[3]] = None
             
             score = self.evaluate_board(self.board)
             
             # revert
+            if promoted:
+                moving.type = "Pawn"
+
             self.board[start[0]][start[1]][start[2]][start[3]] = moving
             self.board[end[0]][end[1]][end[2]][end[3]] = captured
             
@@ -164,7 +172,15 @@ class GameManager:
             
         # Apply move
         start, end = best_move_overall
-        self.board[end[0]][end[1]][end[2]][end[3]] = self.board[start[0]][start[1]][start[2]][start[3]]
+        moving_piece = self.board[start[0]][start[1]][start[2]][start[3]]
+        
+        # Pawn Promotion
+        if moving_piece.type == "Pawn":
+            if (moving_piece.color == "white" and end[1] == 7) or (moving_piece.color == "black" and end[1] == 0):
+                moving_piece.type = "Queen"
+                moving_piece.symbol = "Q"
+
+        self.board[end[0]][end[1]][end[2]][end[3]] = moving_piece
         self.board[start[0]][start[1]][start[2]][start[3]] = None
         self.last_move = {"start": start, "end": end}
         self.current_turn = "black" if self.current_turn == "white" else "white"

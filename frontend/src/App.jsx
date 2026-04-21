@@ -5,7 +5,6 @@ import { EffectComposer, Bloom, Noise, ChromaticAberration } from '@react-three/
 import * as THREE from 'three';
 
 const API_URL = "http://127.0.0.1:8000";
-const ROTATION_SPEED = 0.2; // majestic, slower 4D tumble
 const SCHLEGEL_FOCAL = 34;    // defines how deep the 4th dimension zooms inward 
 
 // SCHLEGEL 4D -> 3D PROJECTION
@@ -49,7 +48,7 @@ const CHECAOUnicode = {
 };
 
 // Sub-grid quantum dots: Shows the entire 4,096 coordinate fabric in the hypercube
-const HypergridNodes = () => {
+const HypergridNodes = ({ rotationSpeed }) => {
     const geomRef = useRef();
     
     // Exactly 8*8*8*8 = 4096 individual spatial nodes
@@ -65,7 +64,7 @@ const HypergridNodes = () => {
 
     useFrame((state) => {
        if (!geomRef.current) return;
-       const t = state.clock.elapsedTime * ROTATION_SPEED;
+       const t = state.clock.elapsedTime * rotationSpeed;
        const positions = geomRef.current.attributes.position.array;
        
        for(let i=0; i<pts.length; i++) {
@@ -95,14 +94,19 @@ const HypergridNodes = () => {
 };
 
 // Animated 3D Piece that traverses 4D Space
-const AnimatedPiece3D = ({ color, type, pos4D }) => {
+const AnimatedPiece3D = ({ color, type, pos4D, rotationSpeed }) => {
   const ref = useRef();
+  const ringRef = useRef();
   const isWhite = color === 'white';
   const hexColor = isWhite ? "#00ffff" : "#ff00ff";
   const symbol = CHECAOUnicode[color][type];
 
+  // Randomize initial rotation speed slightly so rings spin organically
+  const spinSpeed = useMemo(() => (Math.random() * 0.5 + 0.5) * (isWhite ? 1 : -1), [isWhite]);
+
   useFrame((state) => {
-    const t = state.clock.elapsedTime * ROTATION_SPEED;
+    const dt = state.clock.elapsedTime;
+    const t = dt * rotationSpeed;
     const [x, y, z, scale] = project4DTo3D(pos4D, t, true);
     
     if (ref.current) {
@@ -110,28 +114,54 @@ const AnimatedPiece3D = ({ color, type, pos4D }) => {
         const finalScale = Math.max(0.1, scale * 1.5);
         ref.current.scale.set(finalScale, finalScale, finalScale);
     }
+    
+    // Spin the ethereal holographic ring locally
+    if (ringRef.current) {
+      ringRef.current.rotation.z = dt * spinSpeed;
+    }
   });
 
   return (
     <group ref={ref}>
-      {/* Sci-fi Base */}
+      {/* Sci-fi Glass Base */}
       <mesh position={[0, -0.4, 0]}>
         <cylinderGeometry args={[0.3, 0.4, 0.05, 16]} />
-        <meshPhysicalMaterial color={hexColor} emissive={hexColor} emissiveIntensity={0.3} transparent opacity={0.6} />
+        <meshPhysicalMaterial 
+          color={hexColor} 
+          emissive={hexColor} 
+          emissiveIntensity={0.4} 
+          transparent={true} 
+          opacity={0.7} 
+          roughness={0.1}
+          metalness={0.8}
+        />
+      </mesh>
+
+      {/* Upgraded Glass Crystal Core */}
+      <mesh position={[0, -0.15, 0]}>
+        <octahedronGeometry args={[0.2, 0]} />
+        <meshPhysicalMaterial 
+          color={hexColor} 
+          emissive={hexColor} 
+          emissiveIntensity={0.5} 
+          wireframe={true} 
+          transparent={true} 
+          opacity={0.3} 
+        />
       </mesh>
       
-      {/* Ethereal Holographic Ring */}
-      <mesh position={[0, -0.35, 0]} rotation={[Math.PI/2, 0, 0]}>
-        <torusGeometry args={[0.45, 0.02, 16, 32]} />
-        <meshBasicMaterial color="#ffffff" transparent opacity={0.4} />
+      {/* Ethereal Holographic Spinning Ring */}
+      <mesh ref={ringRef} position={[0, -0.35, 0]} rotation={[Math.PI/2, 0, 0]}>
+        <torusGeometry args={[0.5, 0.015, 16, 64]} />
+        <meshBasicMaterial color="#ffffff" transparent opacity={0.6} blending={THREE.AdditiveBlending}/>
       </mesh>
       
       {/* Hologram Symbol */}
       <Text 
         position={[0, 0.4, 0]} 
-        fontSize={1.2} 
+        fontSize={1.3} 
         color="#ffffff" 
-        outlineWidth={0.02} 
+        outlineWidth={0.03} 
         outlineColor={hexColor}
         anchorX="center"
         anchorY="middle"
@@ -143,7 +173,7 @@ const AnimatedPiece3D = ({ color, type, pos4D }) => {
 };
 
 // Defines the massive 32 bounding edges of the 4D matrix physically linking dimensions
-const HypercubeWireframe = () => {
+const HypercubeWireframe = ({ rotationSpeed, opacity }) => {
   const geomRef = useRef();
 
   const edges = useMemo(() => {
@@ -167,7 +197,7 @@ const HypercubeWireframe = () => {
 
   useFrame((state) => {
      if (!geomRef.current) return;
-     const t = state.clock.elapsedTime * ROTATION_SPEED;
+     const t = state.clock.elapsedTime * rotationSpeed;
      const positions = geomRef.current.attributes.position.array;
      for(let i = 0; i < edges.length; i++) {
          const [x, y, z] = project4DTo3D(edges[i], t);
@@ -183,17 +213,17 @@ const HypercubeWireframe = () => {
       <bufferGeometry ref={geomRef}>
          <bufferAttribute attach="attributes-position" count={edges.length} array={new Float32Array(edges.length * 3)} itemSize={3} />
       </bufferGeometry>
-      <lineBasicMaterial color="#4455aa" transparent opacity={0.10} />
+      <lineBasicMaterial color="#4455aa" transparent opacity={opacity} />
     </lineSegments>
   );
 };
 
-const AnimatedLaserTrail = ({ lastMove }) => {
+const AnimatedLaserTrail = ({ lastMove, rotationSpeed }) => {
   const geomRef = useRef();
 
   useFrame((state) => {
      if (!lastMove || !geomRef.current) return;
-     const t = state.clock.elapsedTime * ROTATION_SPEED;
+     const t = state.clock.elapsedTime * rotationSpeed;
      const p1 = project4DTo3D(lastMove.start, t);
      const p2 = project4DTo3D(lastMove.end, t);
      
@@ -220,6 +250,15 @@ function App() {
   const [lastMove, setLastMove] = useState(null);
   const [error, setError] = useState(false);
   const [ticks, setTicks] = useState(0);
+
+  // User Settings State
+  const [settings, setSettings] = useState({
+    rotationSpeed: 0.2,
+    bloomIntensity: 1.5,
+    cameraDrift: 0.5,
+    wireframeOpacity: 0.1,
+    showGridNodes: true
+  });
 
   // Automatically fetch from backend loop
   useEffect(() => {
@@ -273,6 +312,7 @@ function App() {
                 color={piece.color} 
                 type={piece.type}
                 pos4D={[x, y, z, w]} 
+                rotationSpeed={settings.rotationSpeed}
               />
             );
           }
@@ -296,6 +336,44 @@ function App() {
         </p>
       </div>
 
+      {/* Interactive Control Panel */}
+      <div className="absolute top-6 right-6 z-10 w-72 bg-black/60 backdrop-blur-md border border-cyan-900/50 p-4 font-mono text-cyan-400 drop-shadow-lg flex flex-col gap-4">
+        <h2 className="text-sm font-bold tracking-widest text-[#fff] border-b border-cyan-900 pb-2 mb-2">ENGINE OVERRIDES</h2>
+        
+        <div className="flex flex-col gap-1">
+          <label className="text-xs flex justify-between">4D ISOCLINIC ROTATION <span>{settings.rotationSpeed.toFixed(2)}x</span></label>
+          <input type="range" min="0" max="1" step="0.05" value={settings.rotationSpeed} 
+            onChange={(e) => setSettings({...settings, rotationSpeed: parseFloat(e.target.value)})}
+            className="accent-cyan-500 bg-cyan-950/30 h-1 appearance-none cursor-pointer" />
+        </div>
+        
+        <div className="flex flex-col gap-1">
+          <label className="text-xs flex justify-between">CAMERA ORBIT DRIFT <span>{settings.cameraDrift.toFixed(1)}x</span></label>
+          <input type="range" min="0" max="2" step="0.1" value={settings.cameraDrift} 
+            onChange={(e) => setSettings({...settings, cameraDrift: parseFloat(e.target.value)})}
+            className="accent-cyan-500 bg-cyan-950/30 h-1 appearance-none cursor-pointer" />
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <label className="text-xs flex justify-between">POST-PROC BLOOM <span>{settings.bloomIntensity.toFixed(1)}</label>
+          <input type="range" min="0" max="4" step="0.1" value={settings.bloomIntensity} 
+            onChange={(e) => setSettings({...settings, bloomIntensity: parseFloat(e.target.value)})}
+            className="accent-cyan-500 bg-cyan-950/30 h-1 appearance-none cursor-pointer" />
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <label className="text-xs flex justify-between">HYPERCUBE WIREFRAME OPACITY <span>{settings.wireframeOpacity.toFixed(2)}</span></label>
+          <input type="range" min="0" max="0.5" step="0.05" value={settings.wireframeOpacity} 
+            onChange={(e) => setSettings({...settings, wireframeOpacity: parseFloat(e.target.value)})}
+            className="accent-cyan-500 bg-cyan-950/30 h-1 appearance-none cursor-pointer" />
+        </div>
+        
+        <div className="flex items-center gap-2 mt-2 cursor-pointer" onClick={() => setSettings({...settings, showGridNodes: !settings.showGridNodes})}>
+          <div className={`w-3 h-3 border border-cyan-400 ${settings.showGridNodes ? 'bg-cyan-500' : 'bg-transparent'}`}></div>
+          <label className="text-xs pointer-events-none">RENDER QUANTUM GRID NODES</label>
+        </div>
+      </div>
+
       <Canvas camera={{ position: [0, 8, 38], fov: 50 }}>
         <color attach="background" args={['#020203']} />
         
@@ -304,20 +382,20 @@ function App() {
         <pointLight position={[-10, 5, -10]} intensity={1.0} color="#ff00ff" />
 
         {/* Core Mathematical Bounding Physics */}
-        <HypercubeWireframe />
+        <HypercubeWireframe rotationSpeed={settings.rotationSpeed} opacity={settings.wireframeOpacity} />
         
         {/* Sub-grid 4,096 dimension field point dots */}
-        <HypergridNodes />
+        {settings.showGridNodes && <HypergridNodes rotationSpeed={settings.rotationSpeed} />}
         
         {/* Pieces themselves */}
         {piecesComponents}
 
         {/* Action laser pulse line */}
-        <AnimatedLaserTrail lastMove={lastMove} />
+        <AnimatedLaserTrail lastMove={lastMove} rotationSpeed={settings.rotationSpeed} />
 
         {/* Hollywood sci-fi visual FX */}
         <EffectComposer disableNormalPass multisampling={0}>
-          <Bloom luminanceThreshold={0.5} luminanceSmoothing={0.9} height={400} intensity={1.5} />
+          <Bloom luminanceThreshold={0.5} luminanceSmoothing={0.9} height={400} intensity={settings.bloomIntensity} />
           <ChromaticAberration offset={[0.002, 0.002]} opacity={0.3} />
           <Noise opacity={0.03} />
         </EffectComposer>
@@ -327,7 +405,8 @@ function App() {
           enableZoom={true}
           enableRotate={true}
           maxDistance={200}
-          autoRotate={false} /* Let the 4D physics do the rotating organically */
+          autoRotate={settings.cameraDrift > 0}
+          autoRotateSpeed={settings.cameraDrift} /* Let the 4D physics do the inside-out rotating, while the camera drifts globally */
         />
       </Canvas>
 

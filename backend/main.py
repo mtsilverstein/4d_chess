@@ -30,16 +30,12 @@ class TickResponse(BaseModel):
 @app.get("/tick")
 async def tick():
     global game_manager
-    if game_manager.engine.is_checkmate(game_manager.current_turn, game_manager.board):
-        state = game_manager.get_board_state()
-        heatmap = game_manager.get_heatmap()
-        return {
-            "board": state,
-            "heatmap": heatmap,
-            "last_move": game_manager.last_move,
-            "turn": game_manager.current_turn,
-            "checkmate": True
-        }
+    
+    # Auto-loop Screensaver: check if game is over (Checkmate or Stalemate)
+    moves = game_manager.get_all_valid_moves(game_manager.current_turn, game_manager.board)
+    if not moves or game_manager.engine.is_checkmate(game_manager.current_turn, game_manager.board):
+        # Start a brand new game natively (the frontend will pick this up automatically gracefully)
+        game_manager = GameManager()
         
     last_move = game_manager.ai_tick()
     state = game_manager.get_board_state()
