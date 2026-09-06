@@ -1,7 +1,15 @@
 {
-  "dependencies": {
-    "@tailwindcss/vite": "^4.2.4",
-    "framer-motion": "^12.38.0",
-    "tailwindcss": "^4.2.4"
-  }
+  "name": "tesseract-portfolio",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "npm --prefix frontend run dev",
+    "build": "npm --prefix frontend run build",
+    "preview": "npm --prefix frontend run preview",
+    "test": "npm --prefix frontend test",
+    "lint": "npm --prefix frontend run lint",
+    "test:e2e": "npm --prefix frontend run test:e2e",
+    "setup": "npm --prefix frontend ci"
+  },
+  "engines": { "node": ">=22.12.0" }
 }

@@ -1,419 +1,550 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Canvas, useFrame } from '@react-three/fiber';
-import { OrbitControls, Text } from '@react-three/drei';
-import { EffectComposer, Bloom, Noise, ChromaticAberration } from '@react-three/postprocessing';
-import * as THREE from 'three';
+import { useEffect, useRef, useState } from 'react'
+import { createGame, key, VALUES } from './engine'
+import Universe from './Universe'
 
-const API_URL = "http://127.0.0.1:8000";
-const SCHLEGEL_FOCAL = 34;    // defines how deep the 4th dimension zooms inward 
-
-// SCHLEGEL 4D -> 3D PROJECTION
-// Now featuring dual-plane Isoclinic Rotation for mathematical realism
-const project4DTo3D = (pos, t, returnScale = false) => {
-  let x = pos[0] - 3.5;
-  let y = pos[1] - 3.5;
-  let z = pos[2] - 3.5;
-  let w = pos[3] - 3.5;
-
-  const SC = 2.4; 
-  x *= SC; y *= SC; z *= SC; w *= SC;
-
-  // 1. Rotation in XW plane
-  const c1 = Math.cos(t), s1 = Math.sin(t);
-  let xw = x * c1 - w * s1;
-  let w1 = x * s1 + w * c1;
-
-  // 2. Rotation in ZW plane (causes the iconic folding inside-out effect)
-  const c2 = Math.cos(t * 0.618), s2 = Math.sin(t * 0.618); // golden ratio speed differential
-  let zw = z * c2 - w1 * s2;
-  let w2 = z * s2 + w1 * c2;
-
-  // 3. Perspective Projection Factor
-  const f = SCHLEGEL_FOCAL / (SCHLEGEL_FOCAL - w2); 
-
-  // LAY THE BOARD FLAT: Map mathematical Y (forward/back) to visual Z (depth)
-  // Map mathematical Z to visual Y (height)
-  // This ensures the 2D chess slice sits properly on a horizontal floor rather than a vertical wall
-  let visX = xw * f;
-  let visY = zw * f; 
-  let visZ = -(y * f); // negative so higher Y goes further into the screen like a standard chess board
-
-  if (returnScale) return [visX, visY, visZ, f];
-  return [visX, visY, visZ];
-};
-
-const CHECAOUnicode = {
-  white: { Pawn: '♙', Knight: '♘', Bishop: '♗', Rook: '♖', Queen: '♕', King: '♔' },
-  black: { Pawn: '♟', Knight: '♞', Bishop: '♝', Rook: '♜', Queen: '♛', King: '♚' }
-};
-
-// Sub-grid quantum dots: Shows the entire 4,096 coordinate fabric in the hypercube
-const HypergridNodes = ({ rotationSpeed }) => {
-    const geomRef = useRef();
-    
-    // Exactly 8*8*8*8 = 4096 individual spatial nodes
-    const pts = useMemo(() => {
-      const arr = [];
-      for(let w=0; w<8; w++)
-      for(let z=0; z<8; z++)
-      for(let y=0; y<8; y++)
-      for(let x=0; x<8; x++)
-         arr.push([x,y,z,w]);
-      return arr;
-    }, []);
-
-    useFrame((state) => {
-       if (!geomRef.current) return;
-       const t = state.clock.elapsedTime * rotationSpeed;
-       const positions = geomRef.current.attributes.position.array;
-       
-       for(let i=0; i<pts.length; i++) {
-          const [px, py, pz] = project4DTo3D(pts[i], t);
-          positions[i*3] = px;
-          positions[i*3+1] = py;
-          positions[i*3+2] = pz;
-       }
-       geomRef.current.attributes.position.needsUpdate = true;
-    });
-
-    return (
-      <points>
-        <bufferGeometry ref={geomRef}>
-          <bufferAttribute attach="attributes-position" count={4096} array={new Float32Array(4096 * 3)} itemSize={3} />
-        </bufferGeometry>
-        <pointsMaterial 
-          color="#0aa" 
-          size={0.06} 
-          transparent 
-          opacity={0.15} 
-          blending={THREE.AdditiveBlending} 
-          depthWrite={false} 
-        />
-      </points>
-    );
-};
-
-// Animated 3D Piece that traverses 4D Space
-const AnimatedPiece3D = ({ color, type, pos4D, rotationSpeed }) => {
-  const ref = useRef();
-  const ringRef = useRef();
-  const isWhite = color === 'white';
-  const hexColor = isWhite ? "#00ffff" : "#ff00ff";
-  const symbol = CHECAOUnicode[color][type];
-
-  // Randomize initial rotation speed slightly so rings spin organically
-  const spinSpeed = useMemo(() => (Math.random() * 0.5 + 0.5) * (isWhite ? 1 : -1), [isWhite]);
-
-  useFrame((state) => {
-    const dt = state.clock.elapsedTime;
-    const t = dt * rotationSpeed;
-    const [x, y, z, scale] = project4DTo3D(pos4D, t, true);
-    
-    if (ref.current) {
-        ref.current.position.set(x, y, z);
-        const finalScale = Math.max(0.1, scale * 1.5);
-        ref.current.scale.set(finalScale, finalScale, finalScale);
-    }
-    
-    // Spin the ethereal holographic ring locally
-    if (ringRef.current) {
-      ringRef.current.rotation.z = dt * spinSpeed;
-    }
-  });
-
-  return (
-    <group ref={ref}>
-      {/* Sci-fi Glass Base */}
-      <mesh position={[0, -0.4, 0]}>
-        <cylinderGeometry args={[0.3, 0.4, 0.05, 16]} />
-        <meshPhysicalMaterial 
-          color={hexColor} 
-          emissive={hexColor} 
-          emissiveIntensity={0.4} 
-          transparent={true} 
-          opacity={0.7} 
-          roughness={0.1}
-          metalness={0.8}
-        />
-      </mesh>
-
-      {/* Upgraded Glass Crystal Core */}
-      <mesh position={[0, -0.15, 0]}>
-        <octahedronGeometry args={[0.2, 0]} />
-        <meshPhysicalMaterial 
-          color={hexColor} 
-          emissive={hexColor} 
-          emissiveIntensity={0.5} 
-          wireframe={true} 
-          transparent={true} 
-          opacity={0.3} 
-        />
-      </mesh>
-      
-      {/* Ethereal Holographic Spinning Ring */}
-      <mesh ref={ringRef} position={[0, -0.35, 0]} rotation={[Math.PI/2, 0, 0]}>
-        <torusGeometry args={[0.5, 0.015, 16, 64]} />
-        <meshBasicMaterial color="#ffffff" transparent opacity={0.6} blending={THREE.AdditiveBlending}/>
-      </mesh>
-      
-      {/* Hologram Symbol */}
-      <Text 
-        position={[0, 0.4, 0]} 
-        fontSize={1.3} 
-        color="#ffffff" 
-        outlineWidth={0.03} 
-        outlineColor={hexColor}
-        anchorX="center"
-        anchorY="middle"
-      >
-        {symbol}
-      </Text>
-    </group>
-  );
-};
-
-// Defines the massive 32 bounding edges of the 4D matrix physically linking dimensions
-const HypercubeWireframe = ({ rotationSpeed, opacity }) => {
-  const geomRef = useRef();
-
-  const edges = useMemo(() => {
-     const pts = [];
-     for(let i = 0; i < 16; i++) {
-         let x1 = (i & 1) ? 7 : 0, y1 = (i & 2) ? 7 : 0, z1 = (i & 4) ? 7 : 0, w1 = (i & 8) ? 7 : 0;
-         for(let j = 0; j < 4; j++) {
-             if ((i & (1 << j)) === 0) {
-                 let x2 = x1, y2 = y1, z2 = z1, w2 = w1;
-                 if (j === 0) x2 = 7;
-                 if (j === 1) y2 = 7;
-                 if (j === 2) z2 = 7;
-                 if (j === 3) w2 = 7;
-                 pts.push([x1, y1, z1, w1]);
-                 pts.push([x2, y2, z2, w2]);
-             }
-         }
-     }
-     return pts;
-  }, []);
-
-  useFrame((state) => {
-     if (!geomRef.current) return;
-     const t = state.clock.elapsedTime * rotationSpeed;
-     const positions = geomRef.current.attributes.position.array;
-     for(let i = 0; i < edges.length; i++) {
-         const [x, y, z] = project4DTo3D(edges[i], t);
-         positions[i*3] = x;
-         positions[i*3+1] = y;
-         positions[i*3+2] = z;
-     }
-     geomRef.current.attributes.position.needsUpdate = true;
-  });
-
-  return (
-    <lineSegments>
-      <bufferGeometry ref={geomRef}>
-         <bufferAttribute attach="attributes-position" count={edges.length} array={new Float32Array(edges.length * 3)} itemSize={3} />
-      </bufferGeometry>
-      <lineBasicMaterial color="#4455aa" transparent opacity={opacity} />
-    </lineSegments>
-  );
-};
-
-const AnimatedLaserTrail = ({ lastMove, rotationSpeed }) => {
-  const geomRef = useRef();
-
-  useFrame((state) => {
-     if (!lastMove || !geomRef.current) return;
-     const t = state.clock.elapsedTime * rotationSpeed;
-     const p1 = project4DTo3D(lastMove.start, t);
-     const p2 = project4DTo3D(lastMove.end, t);
-     
-     const positions = geomRef.current.attributes.position.array;
-     positions[0] = p1[0]; positions[1] = p1[1]; positions[2] = p1[2];
-     positions[3] = p2[0]; positions[4] = p2[1]; positions[5] = p2[2];
-     geomRef.current.attributes.position.needsUpdate = true;
-  });
-
-  if (!lastMove) return null;
-
-  return (
-    <lineSegments>
-      <bufferGeometry ref={geomRef}>
-         <bufferAttribute attach="attributes-position" count={2} array={new Float32Array(6)} itemSize={3} />
-      </bufferGeometry>
-      <lineBasicMaterial color="#ffff00" transparent opacity={0.9} />
-    </lineSegments>
-  );
-};
-
-function App() {
-  const [boardData, setBoardData] = useState([]);
-  const [lastMove, setLastMove] = useState(null);
-  const [error, setError] = useState(false);
-  const [ticks, setTicks] = useState(0);
-
-  // User Settings State
-  const [settings, setSettings] = useState({
-    rotationSpeed: 0.2,
-    bloomIntensity: 1.5,
-    cameraDrift: 0.5,
-    wireframeOpacity: 0.1,
-    showGridNodes: true
-  });
-
-  // Automatically fetch from backend loop
-  useEffect(() => {
-    fetch(`${API_URL}/reset`, { method: "POST" })
-      .catch(err => console.error(err));
-  }, []);
-
-  useEffect(() => {
-    const interval = setInterval(async () => {
-      try {
-        const res = await fetch(`${API_URL}/tick`);
-        if (!res.ok) throw new Error("API Tick Failed");
-        const data = await res.json();
-        setBoardData(data.board);
-        setLastMove(data.last_move);
-        setTicks(prev => prev + 1);
-        setError(false);
-      } catch (err) {
-        setError(true);
-      }
-    }, 1500);
-    return () => clearInterval(interval);
-  }, []);
-
-  if (error) {
-    return (
-        <div className="absolute inset-0 flex items-center justify-center text-[#ff3333] text-2xl font-mono shadow-red bg-[#020202]">
-          DATA FEED INTERRUPTED...
-        </div>
-    );
-  }
-
-  if (!boardData.length) {
-    return (
-        <div className="absolute inset-0 flex items-center justify-center text-cyan-500 text-2xl font-mono opacity-60 animate-pulse bg-[#020202]">
-          INITIALIZING DIMENSIONAL MATRIX...
-        </div>
-    );
-  }
-
-  const piecesComponents = [];
-  for (let w = 0; w < 8; w++) {
-    for (let z = 0; z < 8; z++) {
-      for (let y = 0; y < 8; y++) {
-        for (let x = 0; x < 8; x++) {
-          const piece = boardData[x][y][z][w];
-          if (piece) {
-            piecesComponents.push(
-              <AnimatedPiece3D 
-                key={`p-${x}-${y}-${z}-${w}-${piece.color}-${piece.type}`}
-                color={piece.color} 
-                type={piece.type}
-                pos4D={[x, y, z, w]} 
-                rotationSpeed={settings.rotationSpeed}
-              />
-            );
-          }
-        }
-      }
-    }
-  }
-
-  return (
-    <div className="w-screen h-screen bg-[#020202] overflow-hidden relative selection:bg-cyan-500/30">
-      
-      {/* Sci-Fi HUD Overlay */}
-      <div className="absolute top-6 left-6 z-10 text-cyan-400 font-mono pointer-events-none drop-shadow-[0_0_10px_rgba(0,255,255,0.7)] flex flex-col gap-1">
-        <h1 className="text-3xl font-bold tracking-[0.25em] text-[#fff]">HYPER-ENGINE V4</h1>
-        <div className="w-64 h-[1px] bg-gradient-to-r from-cyan-400 to-transparent my-1"></div>
-        <p className="text-xs tracking-widest text-[#0ff]/80">MATRIX SCHLEGEL PROJECTION [ONLINE]</p>
-        <p className="text-xs tracking-wide text-[#0ff]/60">AXES LOCK: [X,Y] --- SPILLOVER DETECTED: [Z,W]</p>
-        <p className="text-xs tracking-wide text-[#0ff]/60">CYCLES ALIVE: {ticks}</p>
-        <p className="text-xs tracking-widest bg-cyan-900/30 w-max px-2 py-1 mt-2 border border-cyan-400/20">
-          {lastMove ? "SIMULATING ORGANIC VECTOR" : "AWAITING ENGINE RESPONSE"}
-        </p>
-      </div>
-
-      {/* Interactive Control Panel */}
-      <div className="absolute top-6 right-6 z-10 w-72 bg-black/60 backdrop-blur-md border border-cyan-900/50 p-4 font-mono text-cyan-400 drop-shadow-lg flex flex-col gap-4">
-        <h2 className="text-sm font-bold tracking-widest text-[#fff] border-b border-cyan-900 pb-2 mb-2">ENGINE OVERRIDES</h2>
-        
-        <div className="flex flex-col gap-1">
-          <label className="text-xs flex justify-between">4D ISOCLINIC ROTATION <span>{settings.rotationSpeed.toFixed(2)}x</span></label>
-          <input type="range" min="0" max="1" step="0.05" value={settings.rotationSpeed} 
-            onChange={(e) => setSettings({...settings, rotationSpeed: parseFloat(e.target.value)})}
-            className="accent-cyan-500 bg-cyan-950/30 h-1 appearance-none cursor-pointer" />
-        </div>
-        
-        <div className="flex flex-col gap-1">
-          <label className="text-xs flex justify-between">CAMERA ORBIT DRIFT <span>{settings.cameraDrift.toFixed(1)}x</span></label>
-          <input type="range" min="0" max="2" step="0.1" value={settings.cameraDrift} 
-            onChange={(e) => setSettings({...settings, cameraDrift: parseFloat(e.target.value)})}
-            className="accent-cyan-500 bg-cyan-950/30 h-1 appearance-none cursor-pointer" />
-        </div>
-
-        <div className="flex flex-col gap-1">
-          <label className="text-xs flex justify-between">POST-PROC BLOOM <span>{settings.bloomIntensity.toFixed(1)}</label>
-          <input type="range" min="0" max="4" step="0.1" value={settings.bloomIntensity} 
-            onChange={(e) => setSettings({...settings, bloomIntensity: parseFloat(e.target.value)})}
-            className="accent-cyan-500 bg-cyan-950/30 h-1 appearance-none cursor-pointer" />
-        </div>
-
-        <div className="flex flex-col gap-1">
-          <label className="text-xs flex justify-between">HYPERCUBE WIREFRAME OPACITY <span>{settings.wireframeOpacity.toFixed(2)}</span></label>
-          <input type="range" min="0" max="0.5" step="0.05" value={settings.wireframeOpacity} 
-            onChange={(e) => setSettings({...settings, wireframeOpacity: parseFloat(e.target.value)})}
-            className="accent-cyan-500 bg-cyan-950/30 h-1 appearance-none cursor-pointer" />
-        </div>
-        
-        <div className="flex items-center gap-2 mt-2 cursor-pointer" onClick={() => setSettings({...settings, showGridNodes: !settings.showGridNodes})}>
-          <div className={`w-3 h-3 border border-cyan-400 ${settings.showGridNodes ? 'bg-cyan-500' : 'bg-transparent'}`}></div>
-          <label className="text-xs pointer-events-none">RENDER QUANTUM GRID NODES</label>
-        </div>
-      </div>
-
-      <Canvas camera={{ position: [0, 8, 38], fov: 50 }}>
-        <color attach="background" args={['#020203']} />
-        
-        <ambientLight intensity={0.4} />
-        <pointLight position={[10, 20, 10]} intensity={2.0} color="#ffffff" />
-        <pointLight position={[-10, 5, -10]} intensity={1.0} color="#ff00ff" />
-
-        {/* Core Mathematical Bounding Physics */}
-        <HypercubeWireframe rotationSpeed={settings.rotationSpeed} opacity={settings.wireframeOpacity} />
-        
-        {/* Sub-grid 4,096 dimension field point dots */}
-        {settings.showGridNodes && <HypergridNodes rotationSpeed={settings.rotationSpeed} />}
-        
-        {/* Pieces themselves */}
-        {piecesComponents}
-
-        {/* Action laser pulse line */}
-        <AnimatedLaserTrail lastMove={lastMove} rotationSpeed={settings.rotationSpeed} />
-
-        {/* Hollywood sci-fi visual FX */}
-        <EffectComposer disableNormalPass multisampling={0}>
-          <Bloom luminanceThreshold={0.5} luminanceSmoothing={0.9} height={400} intensity={settings.bloomIntensity} />
-          <ChromaticAberration offset={[0.002, 0.002]} opacity={0.3} />
-          <Noise opacity={0.03} />
-        </EffectComposer>
-
-        <OrbitControls 
-          enablePan={true}
-          enableZoom={true}
-          enableRotate={true}
-          maxDistance={200}
-          autoRotate={settings.cameraDrift > 0}
-          autoRotateSpeed={settings.cameraDrift} /* Let the 4D physics do the inside-out rotating, while the camera drifts globally */
-        />
-      </Canvas>
-
-      {/* Frame Vignette for depth */}
-      <div className="absolute inset-0 pointer-events-none" style={{ boxShadow: 'inset 0 0 150px #000' }}></div>
-    </div>
-  );
+const SYMBOLS = { King: '♚', Queen: '♛', Rook: '♜', Bishop: '♝', Knight: '♞', Pawn: '♟' }
+const coordinate = (pos) => `(${pos.join(', ')})`
+const endings = {
+  checkmate: 'Checkmate',
+  stalemate: 'Draw · stalemate',
+  repetition: 'Draw · repetition',
+  'fifty-move': 'Draw · fifty-move rule',
+  insufficient: 'Draw · kings only',
+  'move-limit': 'Complete · 500-ply limit',
 }
 
-export default App;
+export default function App() {
+  const [game, setGame] = useState(createGame)
+  const [heat, setHeat] = useState({})
+  const [running, setRunning] = useState(false)
+  const [ready, setReady] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [speed, setSpeed] = useState(1400)
+  const [rotate, setRotate] = useState(
+    () => !window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+  )
+  const [showNodes, setShowNodes] = useState(true)
+  const [showHeat, setShowHeat] = useState(false)
+  const [slice, setSlice] = useState([0, 0])
+  const [follow, setFollow] = useState(true)
+  const [selected, setSelected] = useState(null)
+  const [about, setAbout] = useState(false)
+  const [immersive, setImmersive] = useState(false)
+  const worker = useRef(null)
+  const generation = useRef(0)
+  const pending = useRef(false)
+  const dialog = useRef(null)
+  const lastMove = game.history.at(-1)
+  const activeSlice = follow && lastMove ? [lastMove.end[2], lastMove.end[3]] : slice
+
+  useEffect(() => {
+    const instance = new Worker(new URL('./engine.worker.js', import.meta.url), { type: 'module' })
+    worker.current = instance
+    instance.onmessage = ({ data }) => {
+      if (data.generation !== generation.current) return
+      pending.current = false
+      setBusy(false)
+      if (data.error) {
+        setError(data.error)
+        setRunning(false)
+        return
+      }
+      setGame(data.game)
+      setHeat(data.heat)
+      setReady(true)
+      if (data.game.status !== 'playing') setRunning(false)
+    }
+    instance.onerror = () => {
+      pending.current = false
+      setBusy(false)
+      setError('The simulation worker stopped. Reload the page to restart.')
+      setRunning(false)
+    }
+    instance.postMessage({ type: 'state', generation: generation.current })
+    return () => {
+      instance.terminate()
+      worker.current = null
+    }
+  }, [])
+
+  function step() {
+    if (!worker.current || pending.current || game.status !== 'playing') return
+    pending.current = true
+    setBusy(true)
+    worker.current.postMessage({ type: 'step', generation: generation.current })
+  }
+
+  useEffect(() => {
+    if (!running || !ready || busy || game.status !== 'playing') return
+    const timer = setTimeout(() => {
+      if (document.hidden || pending.current) return
+      pending.current = true
+      setBusy(true)
+      worker.current?.postMessage({ type: 'step', generation: generation.current })
+    }, speed)
+    return () => clearTimeout(timer)
+  }, [running, ready, busy, speed, game])
+
+  useEffect(() => {
+    const hidden = () => {
+      if (document.hidden) setRunning(false)
+    }
+    const escape = (event) => {
+      if (event.key === 'Escape') setImmersive(false)
+    }
+    document.addEventListener('visibilitychange', hidden)
+    window.addEventListener('keydown', escape)
+    return () => {
+      document.removeEventListener('visibilitychange', hidden)
+      window.removeEventListener('keydown', escape)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (about) dialog.current?.showModal()
+    else dialog.current?.close()
+  }, [about])
+
+  function reset() {
+    generation.current++
+    pending.current = true
+    setBusy(true)
+    setRunning(false)
+    setSelected(null)
+    setSlice([0, 0])
+    setError('')
+    worker.current?.postMessage({ type: 'reset', generation: generation.current })
+  }
+
+  const piece = game.pieces.find((p) => p.id === selected)
+  const slicePieces = game.pieces.filter(
+    (p) => p.pos[2] === activeSlice[0] && p.pos[3] === activeSlice[1],
+  )
+  const occupied = new Set(game.pieces.map((p) => `${p.pos[2]},${p.pos[3]}`)).size
+  const material = (color) =>
+    game.pieces.filter((p) => p.color === color).reduce((sum, p) => sum + VALUES[p.type], 0)
+  const whiteMaterial = material('white'),
+    blackMaterial = material('black')
+
+  return (
+    <div className={`app ${immersive ? 'immersive' : ''}`}>
+      <header className="topbar">
+        <a className="brand" href="#" aria-label="Tesseract home">
+          <span className="brand-mark">◇</span> TESSERACT <span className="brand-divider" />
+          <span className="brand-sub">FOUR-DIMENSIONAL CHESS</span>
+        </a>
+        <button className="text-button" onClick={() => setAbout(true)}>
+          The experiment <span>↗</span>
+        </button>
+      </header>
+      <main>
+        <section className="intro">
+          <div>
+            <div className="eyebrow">
+              <span className="tiny-line" /> AN EXPERIMENT IN SPACE & STRATEGY
+            </div>
+            <h1>
+              Chess, beyond
+              <br />
+              <em>the board.</em>
+            </h1>
+            <p>32 pieces. Four axes. A different kind of possibility.</p>
+          </div>
+          <div className="intro-note">
+            <span>01 — THE OBSERVATORY</span>
+            <p>
+              Watch two algorithms navigate a world
+              <br />
+              with one more dimension than ours.
+            </p>
+          </div>
+        </section>
+        <div className="workspace">
+          <section
+            className="observatory"
+            aria-label="Interactive four-dimensional chess projection"
+          >
+            <div className="scene-heading">
+              <span className="eyebrow">4D → 3D → 2D PROJECTION</span>
+              <span className={`status ${running ? 'live' : ''}`}>
+                <i />
+                {!ready ? 'INITIALIZING' : busy ? 'COMPUTING' : running ? 'SIMULATING' : 'PAUSED'}
+              </span>
+            </div>
+            <Universe
+              pieces={game.pieces}
+              lastMove={lastMove}
+              rotate={rotate}
+              showNodes={showNodes}
+              showHeat={showHeat}
+              heat={heat}
+              selected={selected}
+              onSelect={setSelected}
+            />
+            <div className="scene-caption">
+              <span className="axis-label">
+                X <b>Y</b> Z <b>W</b>
+              </span>
+              <span>Drag to orbit · Scroll to zoom · Select a piece</span>
+            </div>
+            <div className="scene-stats">
+              <div>
+                <strong>4,096</strong>
+                <span>COORDINATES</span>
+              </div>
+              <div>
+                <strong>
+                  {String(occupied).padStart(2, '0')}
+                  <small> / 64</small>
+                </strong>
+                <span>OCCUPIED PLANES</span>
+              </div>
+              <div>
+                <strong data-testid="ply">{String(game.ply).padStart(3, '0')}</strong>
+                <span>HALF-MOVES</span>
+              </div>
+            </div>
+            <button
+              className="expand-button"
+              onClick={() => setImmersive(!immersive)}
+              aria-label={immersive ? 'Exit immersive view' : 'Enter immersive view'}
+              title={immersive ? 'Exit immersive view (Esc)' : 'Immersive view'}
+            >
+              {immersive ? '↙' : '↗'}
+            </button>
+          </section>
+          <aside className="inspector">
+            <div className="panel-title">
+              <h2>The simulation</h2>
+              <span className="index">01 / LIVE STATE</span>
+            </div>
+            <div className="turn-row">
+              <span className={`side-dot ${game.turn}`} />
+              <strong>
+                {endings[game.status] || `${game.turn === 'white' ? 'Ivory' : 'Copper'} to move`}
+              </strong>
+              {game.check && game.status === 'playing' && <span className="check">CHECK</span>}
+              <span className="cpu">CPU × CPU</span>
+            </div>
+            <div className="playback">
+              <button
+                className="primary-button"
+                disabled={!ready || !!error || game.status !== 'playing'}
+                onClick={() => setRunning(!running)}
+              >
+                {running ? 'Ⅱ Pause' : '▶ Play simulation'}
+              </button>
+              <button
+                className="icon-button"
+                disabled={!ready || busy || running || !!error || game.status !== 'playing'}
+                onClick={step}
+                aria-label="Advance one move"
+                title="Advance one move"
+              >
+                ↦
+              </button>
+              <button
+                className="icon-button"
+                disabled={!ready}
+                onClick={reset}
+                aria-label="Reset simulation"
+                title="Reset simulation"
+              >
+                ↺
+              </button>
+            </div>
+            {error && (
+              <p className="error" role="alert">
+                {error}
+              </p>
+            )}
+            <div className="speed-row">
+              <label htmlFor="speed">Pace</label>
+              <select id="speed" value={speed} onChange={(e) => setSpeed(Number(e.target.value))}>
+                <option value={2600}>Contemplative · 2.6s</option>
+                <option value={1400}>Balanced · 1.4s</option>
+                <option value={450}>Rapid · 0.45s</option>
+              </select>
+            </div>
+            <div className="slice-heading">
+              <h2>Plane inspector</h2>
+              <label className="follow">
+                <input
+                  type="checkbox"
+                  checked={follow}
+                  onChange={(e) => {
+                    setSlice(activeSlice)
+                    setFollow(e.target.checked)
+                  }}
+                />{' '}
+                Follow move
+              </label>
+            </div>
+            <div className="slice-controls">
+              {['Z', 'W'].map((axis, i) => (
+                <label key={axis}>
+                  {axis}
+                  <select
+                    aria-label={`${axis} plane`}
+                    value={activeSlice[i]}
+                    onChange={(e) => {
+                      const next = [...activeSlice]
+                      next[i] = Number(e.target.value)
+                      setSlice(next)
+                      setFollow(false)
+                    }}
+                  >
+                    {Array.from({ length: 8 }, (_, n) => (
+                      <option key={n} value={n}>
+                        {n}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ))}
+              <span>{slicePieces.length} pieces in this plane</span>
+            </div>
+            <div className="board-wrap">
+              <div className="rank-labels">
+                {[7, 6, 5, 4, 3, 2, 1, 0].map((n) => (
+                  <span key={n}>{n}</span>
+                ))}
+              </div>
+              <div
+                className="slice-board"
+                aria-label={`XY board at Z ${activeSlice[0]}, W ${activeSlice[1]}`}
+              >
+                {Array.from({ length: 64 }, (_, n) => {
+                  const x = n % 8,
+                    y = 7 - Math.floor(n / 8),
+                    pos = [x, y, ...activeSlice]
+                  const p = slicePieces.find((p) => p.pos[0] === x && p.pos[1] === y)
+                  const last =
+                    lastMove && (key(lastMove.start) === key(pos) || key(lastMove.end) === key(pos))
+                  const pressure = heat[key(pos)]
+                  return (
+                    <button
+                      key={n}
+                      className={`cell ${(x + y) % 2 ? 'dark' : ''} ${p?.color || ''} ${last ? 'last' : ''} ${p && selected === p.id ? 'selected' : ''}`}
+                      onClick={() => setSelected(p?.id || null)}
+                      aria-label={`${coordinate(pos)}${p ? ` ${p.color} ${p.type}` : ' empty'}`}
+                      title={`${coordinate(pos)}${p ? ` · ${p.color} ${p.type}` : ''}`}
+                      style={
+                        showHeat && pressure
+                          ? {
+                              boxShadow: `inset 0 0 0 20px rgba(114,161,141,${Math.min(0.5, (pressure.white + pressure.black) * 0.09)})`,
+                            }
+                          : undefined
+                      }
+                    >
+                      {p ? SYMBOLS[p.type] : ''}
+                    </button>
+                  )
+                })}
+              </div>
+              <div className="file-labels">
+                {[0, 1, 2, 3, 4, 5, 6, 7].map((n) => (
+                  <span key={n}>{n}</span>
+                ))}
+              </div>
+            </div>
+            <div className="piece-detail" aria-live="polite">
+              {piece ? (
+                <>
+                  <span className={piece.color}>{SYMBOLS[piece.type]}</span>
+                  <div>
+                    <strong>
+                      {piece.color === 'white' ? 'Ivory' : 'Copper'} {piece.type.toLowerCase()}
+                    </strong>
+                    <small>[x, y, z, w] = {coordinate(piece.pos)}</small>
+                  </div>
+                  <button
+                    className="text-button"
+                    onClick={() => {
+                      setSlice(piece.pos.slice(2))
+                      setFollow(false)
+                    }}
+                  >
+                    Locate ↗
+                  </button>
+                </>
+              ) : (
+                <>
+                  <span>⌖</span>
+                  <p>Select a piece to inspect its coordinates.</p>
+                </>
+              )}
+            </div>
+          </aside>
+        </div>
+        <div className="lower-grid">
+          <section className="lower-panel">
+            <div className="panel-title">
+              <h2>Set the atmosphere</h2>
+              <span className="index">02 / DISPLAY</span>
+            </div>
+            <div className="toggles">
+              {[
+                [rotate, setRotate, 'Rotate through 4D'],
+                [showNodes, setShowNodes, 'Coordinate lattice'],
+                [showHeat, setShowHeat, 'Attack pressure'],
+              ].map(([value, setter, label]) => (
+                <label key={label} className="toggle-row">
+                  <span>{label}</span>
+                  <input
+                    type="checkbox"
+                    role="switch"
+                    checked={value}
+                    onChange={(e) => setter(e.target.checked)}
+                  />
+                  <span className="switch" />
+                </label>
+              ))}
+            </div>
+            <p className="muted">Projection motion is independent of game playback.</p>
+          </section>
+          <section className="lower-panel">
+            <div className="panel-title">
+              <h2>Balance of power</h2>
+              <span className="index">03 / MATERIAL</span>
+            </div>
+            <div className="material-labels">
+              <span>
+                <i className="side-dot white" /> Ivory <b>{whiteMaterial}</b>
+              </span>
+              <span>
+                <b>{blackMaterial}</b> Copper <i className="side-dot black" />
+              </span>
+            </div>
+            <div className="material-bar">
+              <div
+                style={{
+                  width: `${whiteMaterial + blackMaterial ? (whiteMaterial / (whiteMaterial + blackMaterial)) * 100 : 50}%`,
+                }}
+              />
+            </div>
+            <div className="material-labels muted">
+              <span>{game.pieces.filter((p) => p.color === 'white').length} pieces</span>
+              <span>{game.pieces.filter((p) => p.color === 'black').length} pieces</span>
+            </div>
+            <p className="muted">Material only. Position can tell a different story.</p>
+          </section>
+          <section className="lower-panel">
+            <div className="panel-title">
+              <h2>Across dimensions</h2>
+              <span className="index">04 / MOVE LOG</span>
+            </div>
+            <div className="move-list" aria-label="Recent moves">
+              {game.history.length ? (
+                game.history
+                  .slice(-4)
+                  .reverse()
+                  .map((move, i) => (
+                    <div className="move-row" key={game.ply - i}>
+                      <span className="move-number">{String(game.ply - i).padStart(3, '0')}</span>
+                      <span className={`move-symbol ${move.color}`}>{SYMBOLS[move.type]}</span>
+                      <span title={`${coordinate(move.start)} → ${coordinate(move.end)}`}>
+                        {move.start.join('')} <b>→</b> {move.end.join('')}
+                        {move.promotion ? ' = Q' : move.captured ? ' ×' : ''}
+                      </span>
+                      <span className="move-dimension">
+                        {move.start[3] !== move.end[3]
+                          ? 'W shift'
+                          : move.start[2] !== move.end[2]
+                            ? 'Z shift'
+                            : 'XY plane'}
+                      </span>
+                    </div>
+                  ))
+              ) : (
+                <div className="empty-log">
+                  <span>↗</span>
+                  <p>
+                    Every move opens another direction.
+                    <br />
+                    Press play to begin the experiment.
+                  </p>
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
+        <footer>
+          <span>A familiar game. An unfamiliar geometry.</span>
+          <span>
+            REACT · WEB WORKERS · 4D MATHEMATICS <span className="footer-star">✳</span>
+          </span>
+        </footer>
+      </main>
+      <dialog
+        ref={dialog}
+        aria-labelledby="experiment-title"
+        onCancel={() => setAbout(false)}
+        onClose={() => setAbout(false)}
+      >
+        <button
+          className="dialog-close icon-button"
+          onClick={() => setAbout(false)}
+          aria-label="Close explanation"
+        >
+          ×
+        </button>
+        <div className="eyebrow">THE EXPERIMENT</div>
+        <h2>
+          <span id="experiment-title">One more dimension.</span>
+          <br />
+          Many more possibilities.
+        </h2>
+        <p>
+          Tesseract is an autonomous chess variant on an 8 × 8 × 8 × 8 grid. Each square has four
+          coordinates: <strong>[x, y, z, w]</strong>. The inspector fixes Z and W to show one
+          familiar XY board out of 64.
+        </p>
+        <h3>How pieces travel</h3>
+        <ul>
+          <li>
+            <strong>Rook:</strong> slides along one of the four axes.
+          </li>
+          <li>
+            <strong>Bishop:</strong> slides equally along exactly two axes.
+          </li>
+          <li>
+            <strong>Queen:</strong> slides equally along any combination of axes.
+          </li>
+          <li>
+            <strong>Knight:</strong> jumps two cells on one axis and one on another.
+          </li>
+          <li>
+            <strong>King:</strong> moves one cell along any combination of axes, safely.
+          </li>
+          <li>
+            <strong>Pawn:</strong> advances along Y, captures along Y plus one other axis, and
+            promotes to queen at the opposite Y edge.
+          </li>
+        </ul>
+        <p>
+          Ivory starts at Z = W = 0; Copper at Z = W = 7. Kings cannot move into check. Checkmate,
+          stalemate, threefold repetition, fifty quiet moves per side, and kings-only draws end the
+          game. A 500-half-move cap bounds the experiment. This variant has no castling or en
+          passant.
+        </p>
+        <h3>What you’re seeing</h3>
+        <p>
+          Successive rotations in the XW and ZW planes feed a 4D perspective projection into 3D,
+          then a camera projects that onto your screen. Apparent overlaps can be far apart in four
+          dimensions. The lattice represents all 4,096 coordinates; bright rings mark the last move.
+        </p>
+        <p>
+          Attack pressure shows geometric attacks from both sides, including defended squares and
+          pinned pieces. The CPU uses a one-ply heuristic for material, safety, and central
+          development with a little randomness. It is an exploration, not a competitive chess
+          engine.
+        </p>
+        <div className="dialog-note">
+          Runs locally in your browser. No account, server, or external data feed.
+        </div>
+      </dialog>
+    </div>
+  )
+}
