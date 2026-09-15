@@ -758,11 +758,15 @@ dialog p + p {
   color: #f0b08e;
   margin-top: 12px;
 }
+html:has(.immersive) {
+  overflow: hidden;
+}
 .immersive .observatory {
   position: fixed;
   inset: 0;
   z-index: 10;
   min-height: 0;
+  background-color: #101512;
 }
 .immersive .universe {
   inset: 40px 0 100px;
