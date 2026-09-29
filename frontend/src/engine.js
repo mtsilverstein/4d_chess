@@ -129,12 +129,14 @@ export function isAttacked(pos, color, board) {
   return false
 }
 
-export function legalMoves(pieces, color) {
+export function legalMoves(pieces, color, limit = Infinity) {
   const board = new Map(pieces.map((p) => [key(p.pos), p]))
   const king = pieces.find((p) => p.color === color && p.type === 'King')
   if (!king) throw new Error(`Missing ${color} king`)
   const moves = []
-  for (const p of pieces.filter((p) => p.color === color)) {
+  const own = pieces.filter((p) => p.color === color)
+  if (limit === 1) own.sort((a, b) => Number(b.type === 'King') - Number(a.type === 'King'))
+  for (const p of own) {
     const startKey = key(p.pos)
     for (const end of targets(p, board)) {
       const endKey = key(end),
@@ -151,6 +153,7 @@ export function legalMoves(pieces, color) {
           type: p.type,
           captured: captured?.type ?? null,
         })
+        if (moves.length >= limit) return moves
       }
       board.set(startKey, p)
       if (captured) board.set(endKey, captured)
@@ -204,6 +207,72 @@ export function heatmap(pieces) {
     }
   return heat
 }
+const center = (pos) => pos.reduce((sum, v) => sum + Math.abs(v - 3.5), 0)
+const promotes = (move) => move.type === 'Pawn' && (move.end[1] === 0 || move.end[1] === 7)
+const tacticalGain = (move) => (VALUES[move.captured] || 0) * 10 + (promotes(move) ? 80 : 0)
+const boardOf = (pieces) => new Map(pieces.map((p) => [key(p.pos), p]))
+const checked = (pieces, color, board) =>
+  isAttacked(pieces.find((p) => p.type === 'King' && p.color === color).pos, color, board)
+
+// Inspect every checking move for immediate mate before pruning. Then search
+// all legal opponent replies for the best 12 candidates. This is selective
+// two-ply search, not a full minimax engine; king mobility breaks quiet ties.
+function chooseMove(game, moves, random) {
+  const enemy = opposite(game.turn)
+  const ranked = []
+  for (const move of moves) {
+    const pieces = applyMove(game.pieces, move)
+    const board = boardOf(pieces)
+    const check = checked(pieces, enemy, board)
+    if (check && !legalMoves(pieces, enemy, 1).length) return move
+    const recent = game.history
+      .slice(-12)
+      .filter((m) => m.id === move.id && key(m.end) === key(move.end)).length
+    const exposed = isAttacked(move.end, game.turn, board)
+    const value = VALUES[promotes(move) ? 'Queen' : move.type]
+    const score =
+      tacticalGain(move) -
+      (exposed ? value * 8 : 0) +
+      (center(move.start) - center(move.end)) * 0.35 +
+      (check ? 2 : 0) -
+      recent * 3 +
+      random() * 1.2
+    ranked.push({ move, pieces, board, score })
+  }
+  ranked.sort((a, b) => b.score - a.score)
+  let best = -Infinity,
+    chosen = ranked[0].move
+  for (const candidate of ranked.slice(0, 12)) {
+    const replies = legalMoves(candidate.pieces, enemy)
+    // Avoid voluntarily ending a promising attack in stalemate.
+    let score = replies.length ? candidate.score : -20
+    let threat = 0
+    const forcing = replies
+      .map((reply) => {
+        const after = applyMove(candidate.pieces, reply)
+        const check = checked(after, game.turn, boardOf(after))
+        return { after, check, gain: tacticalGain(reply) + (check ? 2 : 0) }
+      })
+      .sort((a, b) => b.gain - a.gain)
+    threat = forcing[0]?.gain ?? 0
+    // Bound expensive mate probes: all replies contribute immediate material
+    // risk, while the eight highest-ranked checks get a legal-escape search.
+    for (const reply of forcing.filter((r) => r.check).slice(0, 8)) {
+      if (!legalMoves(reply.after, game.turn, 1).length) {
+        threat = 100000
+        break
+      }
+    }
+    const escapes = replies.filter((m) => m.type === 'King').length
+    score -= threat + escapes * 0.08
+    if (score > best) {
+      best = score
+      chosen = candidate.move
+    }
+  }
+  return chosen
+}
+
 export function advance(game, random = Math.random) {
   if (game.status !== 'playing') return game
   const moves = legalMoves(game.pieces, game.turn)
@@ -213,35 +282,7 @@ export function advance(game, random = Math.random) {
     const check = isAttacked(king.pos, game.turn, board)
     return { ...game, check, status: check ? 'checkmate' : 'stalemate' }
   }
-  let chosen = moves[0],
-    best = -Infinity
-  // A transparent one-ply heuristic: material, safety, development, and variety.
-  for (const move of moves) {
-    const moving = board.get(key(move.start)),
-      captured = board.get(key(move.end))
-    board.delete(key(move.start))
-    board.set(key(move.end), { ...moving, pos: move.end })
-    const exposed = isAttacked(move.end, game.turn, board)
-    board.delete(key(move.end))
-    board.set(key(move.start), moving)
-    if (captured) board.set(key(move.end), captured)
-    const center = (pos) => pos.reduce((sum, v) => sum + Math.abs(v - 3.5), 0)
-    const promotion = move.type === 'Pawn' && (move.end[1] === 0 || move.end[1] === 7)
-    const recent = game.history
-      .slice(-12)
-      .filter((m) => m.id === move.id && key(m.end) === key(move.end)).length
-    const score =
-      (VALUES[move.captured] || 0) * 10 +
-      (promotion ? 75 : 0) -
-      (exposed ? (VALUES[move.type] || 0) * 8 : 0) +
-      (center(move.start) - center(move.end)) * 0.35 -
-      recent * 3 +
-      random() * 1.2
-    if (score > best) {
-      best = score
-      chosen = move
-    }
-  }
+  const chosen = chooseMove(game, moves, random)
   const pieces = applyMove(game.pieces, chosen),
     turn = opposite(game.turn)
   const quiet = chosen.captured || chosen.type === 'Pawn' ? 0 : game.quiet + 1

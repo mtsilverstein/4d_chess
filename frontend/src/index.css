@@ -1011,3 +1011,13 @@ html:has(.immersive) {
 .slice-board {
   grid-template-rows: repeat(8, minmax(0, 1fr));
 }
+
+.continuous-control {
+  margin-top: 16px;
+}
+.playback-note {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted, #a3ad9d);
+  margin: 8px 0 16px;
+}

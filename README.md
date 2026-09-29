@@ -62,10 +62,14 @@ Checkmate and stalemate end the game, as do threefold repetition, 100 half-moves
 without a pawn move or capture, and kings-only positions. A 500-half-move limit
 also ends the simulation. Castling and en passant are not part of this variant.
 
-The CPU uses a **one-ply heuristic**, rewarding captures, promotion, and movement
-toward the center while penalizing attacked destinations and recent repeat moves.
-Random jitter gives runs variety. It does not perform minimax or claim competitive
-playing strength. Material scores exclude kings (P=1, N=3, B=3.5, R=5, Q=9).
+The CPU checks every checking move for immediate mate, then considers all legal
+opponent replies for its top 12 candidates. It balances captures, promotion, safety,
+king escape squares, central development, and a little randomness. This selective
+two-ply search is an experiment, not a competitive chess engine.
+
+Continuous playback is enabled by default. After a result it waits 3.5 seconds,
+then starts a fresh game; Pause, Reset, and hiding the tab stop playback. Disable
+Continuous playback to hold the final position after each game.
 
 Attack pressure counts geometric attacks, including defended friendly squares and
 pinned pieces. Pawn pushes are excluded. It is not a count of legal moves or a

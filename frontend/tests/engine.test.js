@@ -197,3 +197,25 @@ test('projection remains finite over rotations and all 4096 coordinates', () => 
       assert.ok(project4D(pos, angle).every(Number.isFinite))
     }
 })
+
+test('CPU takes mate in one before rewarding centralization', () => {
+  const pieces = [
+    piece('King', [0, 0, 0, 0]),
+    piece('King', [2, 2, 2, 2], 'black'),
+    piece('Queen', [2, 1, 1, 1], 'black'),
+  ]
+  const game = advance({ ...createGame(), pieces, turn: 'black' }, () => 0.5)
+  assert.equal(game.status, 'checkmate')
+  assert.deepEqual(game.history.at(-1).end, [1, 1, 1, 1])
+})
+
+test('limited legal probe agrees with full move generation and preserves pieces', () => {
+  const pieces = initialPieces()
+  const before = JSON.stringify(pieces)
+  const probe = legalMoves(pieces, 'white', 1)
+  assert.equal(probe.length, 1)
+  assert.ok(
+    legalMoves(pieces, 'white').some((move) => JSON.stringify(move) === JSON.stringify(probe[0])),
+  )
+  assert.equal(JSON.stringify(pieces), before)
+})

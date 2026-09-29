@@ -17,6 +17,7 @@ export default function App() {
   const [game, setGame] = useState(createGame)
   const [heat, setHeat] = useState({})
   const [running, setRunning] = useState(false)
+  const [continuous, setContinuous] = useState(true)
   const [ready, setReady] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -31,6 +32,7 @@ export default function App() {
   const [selected, setSelected] = useState(null)
   const [about, setAbout] = useState(false)
   const [immersive, setImmersive] = useState(false)
+  const continuousRef = useRef(true)
   const worker = useRef(null)
   const generation = useRef(0)
   const pending = useRef(false)
@@ -53,7 +55,7 @@ export default function App() {
       setGame(data.game)
       setHeat(data.heat)
       setReady(true)
-      if (data.game.status !== 'playing') setRunning(false)
+      if (data.game.status !== 'playing' && !continuousRef.current) setRunning(false)
     }
     instance.onerror = () => {
       pending.current = false
@@ -76,15 +78,28 @@ export default function App() {
   }
 
   useEffect(() => {
-    if (!running || !ready || busy || game.status !== 'playing') return
-    const timer = setTimeout(() => {
-      if (document.hidden || pending.current) return
-      pending.current = true
-      setBusy(true)
-      worker.current?.postMessage({ type: 'step', generation: generation.current })
-    }, speed)
+    if (!running || !ready || busy || error) return
+    const ended = game.status !== 'playing'
+    if (ended && !continuous) return
+    const timer = setTimeout(
+      () => {
+        if (document.hidden || pending.current) return
+        pending.current = true
+        setBusy(true)
+        if (ended) {
+          generation.current++
+          setSelected(null)
+          setSlice([0, 0])
+        }
+        worker.current?.postMessage({
+          type: ended ? 'reset' : 'step',
+          generation: generation.current,
+        })
+      },
+      ended ? 3500 : speed,
+    )
     return () => clearTimeout(timer)
-  }, [running, ready, busy, speed, game])
+  }, [running, ready, busy, speed, game, continuous, error])
 
   useEffect(() => {
     const hidden = () => {
@@ -230,7 +245,7 @@ export default function App() {
             <div className="playback">
               <button
                 className="primary-button"
-                disabled={!ready || !!error || game.status !== 'playing'}
+                disabled={!ready || !!error || (!continuous && game.status !== 'playing')}
                 onClick={() => setRunning(!running)}
               >
                 {running ? 'Ⅱ Pause' : '▶ Play simulation'}
@@ -247,7 +262,7 @@ export default function App() {
               <button
                 className="icon-button"
                 disabled={!ready}
-                onClick={reset}
+                onClick={() => reset()}
                 aria-label="Reset simulation"
                 title="Reset simulation"
               >
@@ -259,6 +274,23 @@ export default function App() {
                 {error}
               </p>
             )}
+            <label className="follow continuous-control">
+              <input
+                type="checkbox"
+                checked={continuous}
+                onChange={(e) => {
+                  continuousRef.current = e.target.checked
+                  setContinuous(e.target.checked)
+                  if (!e.target.checked && game.status !== 'playing') setRunning(false)
+                }}
+              />{' '}
+              Continuous playback
+            </label>
+            <p className="playback-note" aria-live="polite">
+              {continuous && running && game.status !== 'playing'
+                ? 'Next game starts in a moment. Pause to hold this result.'
+                : 'Continuous playback starts a fresh game 3.5 seconds after each result.'}
+            </p>
             <div className="speed-row">
               <label htmlFor="speed">Pace</label>
               <select id="speed" value={speed} onChange={(e) => setSpeed(Number(e.target.value))}>
@@ -527,7 +559,7 @@ export default function App() {
           Ivory starts at Z = W = 0; Copper at Z = W = 7. Kings cannot move into check. Checkmate,
           stalemate, threefold repetition, fifty quiet moves per side, and kings-only draws end the
           game. A 500-half-move cap bounds the experiment. This variant has no castling or en
-          passant.
+          passant. Continuous playback preserves these endings, then starts a new game.
         </p>
         <h3>What you’re seeing</h3>
         <p>
@@ -537,9 +569,9 @@ export default function App() {
         </p>
         <p>
           Attack pressure shows geometric attacks from both sides, including defended squares and
-          pinned pieces. The CPU uses a one-ply heuristic for material, safety, and central
-          development with a little randomness. It is an exploration, not a competitive chess
-          engine.
+          pinned pieces. The CPU takes immediate mates and considers opponent replies for its top 12
+          moves, balancing material, safety, and king mobility with a little randomness. It is an
+          exploration, not a competitive chess engine.
         </p>
         <div className="dialog-note">
           Runs locally in your browser. No account, server, or external data feed.

@@ -1,3 +1,4 @@
+import { createGame } from '../src/engine.js'
 import { test, expect } from '@playwright/test'
 
 test('visitor can inspect, step, play, pause, and reset without a backend', async ({ page }) => {
@@ -68,5 +69,62 @@ test('reset invalidates any in-flight step', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Advance one move' })).toBeEnabled()
   await expect(page.getByTestId('ply')).toHaveText('000')
   await page.waitForTimeout(500)
+  await expect(page.getByTestId('ply')).toHaveText('000')
+})
+
+// A deterministic worker fixture reaches a real terminal-state UI immediately,
+// without waiting hundreds of simulated moves. Production worker stays unchanged.
+async function terminalWorker(page) {
+  await page.addInitScript((initial) => {
+    window.Worker = class {
+      constructor() {
+        this.game = initial
+      }
+      postMessage(data) {
+        if (data.type === 'reset') this.game = initial
+        if (data.type === 'step')
+          this.game = { ...initial, ply: 100, quiet: 100, status: 'fifty-move' }
+        setTimeout(
+          () =>
+            this.onmessage?.({ data: { game: this.game, heat: {}, generation: data.generation } }),
+          0,
+        )
+      }
+      terminate() {}
+    }
+  }, createGame())
+}
+
+test('continuous mode holds the result, restarts, and can be paused during the hold', async ({
+  page,
+}) => {
+  await terminalWorker(page)
+  await page.goto('/')
+  await page.getByLabel('Pace').selectOption('450')
+  await page.getByRole('button', { name: 'Play simulation' }).click()
+  await expect(page.getByText('Draw · fifty-move rule', { exact: true })).toBeVisible()
+  await expect(page.getByText('Next game starts in a moment.', { exact: false })).toBeVisible()
+  await page.getByLabel('Pace').selectOption('2600')
+  await expect(page.getByTestId('ply')).toHaveText('000', { timeout: 6000 })
+  await expect(page.getByTestId('ply')).toHaveText('100')
+  await page.getByRole('button', { name: 'Pause', exact: false }).click()
+  await page.waitForTimeout(3800)
+  await expect(page.getByTestId('ply')).toHaveText('100')
+  await expect(page.getByRole('button', { name: 'Play simulation' })).toBeEnabled()
+})
+
+test('disabling continuous playback cancels restart; reset remains paused', async ({ page }) => {
+  await terminalWorker(page)
+  await page.goto('/')
+  await page.getByLabel('Pace').selectOption('450')
+  await page.getByRole('button', { name: 'Play simulation' }).click()
+  await expect(page.getByTestId('ply')).toHaveText('100')
+  await page.getByLabel('Continuous playback').uncheck()
+  await page.waitForTimeout(3800)
+  await expect(page.getByTestId('ply')).toHaveText('100')
+  await expect(page.getByRole('button', { name: 'Play simulation' })).toBeDisabled()
+  await page.getByRole('button', { name: 'Reset simulation' }).click()
+  await expect(page.getByTestId('ply')).toHaveText('000')
+  await page.waitForTimeout(900)
   await expect(page.getByTestId('ply')).toHaveText('000')
 })
